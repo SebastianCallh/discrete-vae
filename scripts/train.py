@@ -11,7 +11,7 @@ from torchvision import datasets, transforms
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from concrete_vae.vae import ConcreteVAE
+from concrete_vae.vae import DiscreteVAE
 
 
 def load_data(data_dir: str = "~/data", **kwargs) -> Tuple[DataLoader, DataLoader]:
@@ -40,7 +40,7 @@ def load_data(data_dir: str = "~/data", **kwargs) -> Tuple[DataLoader, DataLoade
     return train_loader, test_loader
 
 
-def plot_reconstruction(model: ConcreteVAE, x: torch.Tensor, epoch: int) -> plt.Figure:
+def plot_reconstruction(model: DiscreteVAE, x: torch.Tensor, epoch: int) -> plt.Figure:
     model = model.eval()
     x_hat = model.reconstruct(x.to(model.device)).cpu()
 
@@ -58,7 +58,7 @@ def plot_reconstruction(model: ConcreteVAE, x: torch.Tensor, epoch: int) -> plt.
 
 
 def train(
-    model: ConcreteVAE,
+    model: DiscreteVAE,
     optimizer: Optimizer,
     epochs: int,
     data_loader: DataLoader,
@@ -83,7 +83,7 @@ def train(
 
 device = torch.device("cuda" if torch.has_cuda else "cpu")
 train_loader, test_loader = load_data(batch_size=128, num_workers=8)
-model = ConcreteVAE(x_dim=784, z_dim=10).to(device)
+model = DiscreteVAE(x_dim=784, z_dim=10).to(device)
 optimizer = AdamW(model.parameters(), lr=1e-3)
 train(
     model=model,

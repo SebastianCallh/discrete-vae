@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from torch import distributions as D
 
 
-class ConcreteVAE(nn.Module):
+class DiscreteVAE(nn.Module):
     def __init__(
         self,
         x_dim: int,

@@ -1,2 +1,2 @@
 #!/usr/bin/env python3
-from .vae import ConcreteVAE
+from .vae import DiscreteVAE
