@@ -1,12 +1,13 @@
 from abc import abstractmethod
 from math import prod
+from typing import Tuple, Union
 import torch
 from torch import Tensor, nn
 from torch import distributions as D
 
 
 class View(nn.Module):
-    def __init__(self, size: torch.Size):
+    def __init__(self, size: Union[Tuple, torch.Size]):
         super().__init__()
         self.size = size
 
@@ -14,14 +15,14 @@ class View(nn.Module):
         return x.view((x.size()[:1] + self.size))
 
 
-class NNDistribution(nn.Module):
-    def __init__(self, name: str, size: torch.Size):
+class Parameters(nn.Module):
+    def __init__(self, name: str, size: Union[Tuple, torch.Size]):
         super().__init__()
         self._size = size
         self._name = name
 
     @property
-    def size(self) -> torch.Size:
+    def size(self) -> Union[Tuple, torch.Size]:
         return self._size
 
     @property
@@ -29,9 +30,9 @@ class NNDistribution(nn.Module):
         return self._name
 
 
-class Normal(NNDistribution):
-    def __init__(self, in_dim: int, out_size: torch.Size):
-        super().__init__("Normal", out_size)
+class LocScale(Parameters):
+    def __init__(self, in_dim: int, out_size: Union[Tuple, torch.Size]):
+        super().__init__("LocScale", out_size)
         self.loc = nn.Sequential(
             nn.Linear(in_dim, prod(out_size)),
             View(out_size),
@@ -42,13 +43,13 @@ class Normal(NNDistribution):
             nn.Softplus(),
         )
 
-    def forward(self, x: Tensor) -> D.Distribution:
-        return D.Normal(loc=self.loc(x), scale=self.scale(x))
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+        return self.loc(x), self.scale(x)
 
 
-class Bernoulli(NNDistribution):
-    def __init__(self, in_dim: int, out_size: torch.Size):
-        super().__init__("Bernoulli", out_size)
+class Probabilities(Parameters):
+    def __init__(self, in_dim: int, out_size: Union[Tuple, torch.Size]):
+        super().__init__("Probabilities", out_size)
         self._size = out_size
         self.f = nn.Sequential(
             nn.Linear(in_dim, prod(out_size)),
@@ -56,9 +57,8 @@ class Bernoulli(NNDistribution):
             nn.Sigmoid(),
         )
 
-    def forward(self, x: Tensor) -> D.Bernoulli:
-        # Validate_args=False to allow x in [0, 1]
-        return D.Bernoulli(probs=self.f(x), validate_args=False)
+    def forward(self, x: Tensor) -> Tuple[Tensor]:
+        return (self.f(x),)
 
 
 class Print(nn.Module):

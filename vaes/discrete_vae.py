@@ -5,7 +5,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 from torch import distributions as D
 
-from .modules import Bernoulli, SimpleCNN, SimpleTCNN
+from .modules import Probabilities, SimpleCNN, SimpleTCNN
 
 
 class DiscreteVAE(nn.Module):
@@ -35,7 +35,7 @@ class DiscreteVAE(nn.Module):
 
         self.decode = nn.Sequential(
             SimpleTCNN(num_channels=C, out_dim=num_dists * z_dim),
-            Bernoulli(h_dim, x_shape),
+            Probabilities(h_dim, x_shape),
         )
         # self.decode = nn.Sequential(
         #     nn.Linear(self.num_dists * z_dim, h_dim),
