@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 
 from typing import Tuple
-import math
+
 import torch
-from torch.optim import AdamW
-from torch.optim.optimizer import Optimizer
+from torch.functional import Tensor
 from torch.utils.data import DataLoader
+from torch import distributions as D
 from torchvision import datasets, transforms
+import pytorch_lightning as pl
 
 from matplotlib import pyplot as plt
-from tqdm import tqdm
 
-from concrete_vae.vae import DiscreteVAE
+from vaes.modules import Bernoulli, Normal
+from vaes import VAE
 
 
 def load_data(data_dir: str = "~/data", **kwargs) -> Tuple[DataLoader, DataLoader]:
@@ -33,63 +34,48 @@ def load_data(data_dir: str = "~/data", **kwargs) -> Tuple[DataLoader, DataLoade
             download=True,
             transform=transforms.ToTensor(),
         ),
-        shuffle=True,
+        shuffle=False,
         **kwargs,
     )
 
     return train_loader, test_loader
 
 
-def plot_reconstruction(model: DiscreteVAE, x: torch.Tensor, epoch: int) -> plt.Figure:
-    model = model.eval()
-    x_hat = model.reconstruct(x.to(model.device)).cpu()
+class PlotReconstruction(pl.Callback):
+    def __init__(self, x: Tensor):
+        self.x = x
 
-    x = x.numpy().squeeze()
-    x_hat = x_hat.numpy().squeeze()
-    fig, (x_ax, x_hat_ax, res_ax) = plt.subplots(1, 3)
-    fig.suptitle(f"Epoch {epoch}")
-    x_ax.imshow(x)
-    x_ax.set_title("Original image")
-    x_hat_ax.imshow(x_hat)
-    x_hat_ax.set_title("Reconstruction")
-    res_ax.imshow(x - x_hat)
-    res_ax.set_title("Residuals")
-    return fig
+    def on_validation_epoch_end(self, trainer: pl.Trainer, model: VAE):
+        model = model.eval()
+        x_hat = model.reconstruct(self.x.to(model.device)).cpu()
 
-
-def train(
-    model: DiscreteVAE,
-    optimizer: Optimizer,
-    epochs: int,
-    data_loader: DataLoader,
-    anneal_rate: float = 0.00005,
-    min_temp: float = 0.1,
-) -> None:
-    model = model.train()
-    epoch_iter = tqdm(range(epochs))
-    for epoch in epoch_iter:
-        for i, (x, _) in enumerate(data_loader):
-            _, loss = model(x.to(device), return_elbo=True)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            if i % 100 == 0:
-                model.temp = max((model.temp * math.exp(-anneal_rate * i), min_temp))
-
-        fig = plot_reconstruction(model, x=data_loader.dataset[0][0], epoch=epoch)
+        x = self.x.numpy().squeeze()
+        x_hat = x_hat.numpy().squeeze()
+        fig, (x_ax, x_hat_ax, res_ax) = plt.subplots(1, 3)
+        fig.suptitle(f"Epoch {trainer.current_epoch}, z ~ {model.z_dist_name}")
+        x_ax.imshow(x)
+        x_ax.set_title("Original image")
+        x_hat_ax.imshow(x_hat)
+        x_hat_ax.set_title(f"Reconstruction")
+        res_ax.imshow(x - x_hat)
+        res_ax.set_title("Residuals")
         fig.savefig("reconstruction.png")
-        epoch_iter.set_postfix_str(f"{loss.item():.4f}")
 
 
 device = torch.device("cuda" if torch.has_cuda else "cpu")
-train_loader, test_loader = load_data(batch_size=128, num_workers=8)
-model = DiscreteVAE(x_dim=784, z_dim=10).to(device)
-optimizer = AdamW(model.parameters(), lr=1e-3)
-train(
-    model=model,
-    optimizer=optimizer,
-    epochs=30,
-    data_loader=train_loader,
+train_loader, test_loader = load_data(batch_size=128, num_workers=16)
+h_dim = 1000
+model = VAE(
+    lr=1e-3,
+    x_dist=Bernoulli(h_dim, torch.Size((1, 28, 28))),
+    z_dist=Normal(h_dim, torch.Size((50,))),
+    h_dim=h_dim,
+    z_prior=lambda pz: D.Normal(loc=torch.zeros_like(pz.mean), scale=1),
 )
 
-torch.save(model.state_dict(), "model.pt")
+trainer = pl.Trainer(
+    gpus=1,
+    callbacks=[PlotReconstruction(train_loader.dataset[0][0])],
+    check_val_every_n_epoch=5,
+)
+trainer.fit(model, train_loader, test_loader)
