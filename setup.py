@@ -1,10 +1,10 @@
 from distutils.core import setup
 
 setup(
-    name="concrete-vae",
+    name="vaes",
     version="1.0",
-    description="Concrete variational autoencoder",
+    description="Variational autoencoders",
     author="Sebastian Callh",
     author_email="sebastian.callh@gmail.net",
-    packages=["concrete_vae"],
+    packages=["vaes"],
 )
