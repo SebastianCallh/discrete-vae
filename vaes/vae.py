@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-from abc import abstractmethod
-from typing import Callable, Tuple, Union
+from typing import Tuple, Union
 from math import prod
 import torch
 from torch import Tensor, nn
 from torch import distributions as D
 import pytorch_lightning as pl
 
-from .modules import LocScale, Probabilities
+from .modules import Bernoulli, Binary, Normal, RelaxedBernoulli
 
 
 class NormalVAE(pl.LightningModule):
@@ -20,30 +19,30 @@ class NormalVAE(pl.LightningModule):
     ):
         super().__init__()
         self.lr = lr
-        self.pz_params = nn.Sequential(
+        self.pz = nn.Sequential(
             nn.Flatten(),
             nn.Linear(prod(x_size), h_dim),
             nn.Softplus(),
             nn.Linear(h_dim, h_dim),
             nn.Softplus(),
-            LocScale(h_dim, z_size),
+            Normal(h_dim, z_size),
         )
 
-        self.px_params = nn.Sequential(
+        self.px = nn.Sequential(
             nn.Flatten(),
             nn.Linear(prod(z_size), h_dim),
             nn.Softplus(),
             nn.Linear(h_dim, h_dim),
             nn.Softplus(),
-            Probabilities(h_dim, x_size),
+            Bernoulli(h_dim, x_size),
         )
 
     def forward(
         self, x: Tensor, return_elbo: bool = False
     ) -> Union[Tuple[Tensor, Tensor], Tensor]:
-        pz = D.Normal(*self.pz_params(x))
+        pz = self.pz(x)
         z = pz.rsample()
-        px = D.Bernoulli(*self.px_params(z), validate_args=False)
+        px = self.px(z)
         return (x, self._elbo(x, pz, px)) if return_elbo else x
 
     def training_step(self, batch, batch_idx):
@@ -74,8 +73,8 @@ class NormalVAE(pl.LightningModule):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
 
-        z = D.Normal(*self.pz_params(x)).sample()
-        px = D.Bernoulli(*self.px_params(z))
+        z = self.pz(x).sample()
+        px = self.px(z)
         return px.mean
 
     def _elbo(self, x: Tensor, pz: D.Distribution, px: D.Distribution) -> Tensor:
@@ -85,42 +84,45 @@ class NormalVAE(pl.LightningModule):
         return ll - kl
 
 
-class BinaryVAE(pl.LightningModule):
+class BernoulliVAE(pl.LightningModule):
     def __init__(
         self,
         lr: float,
         x_size: Union[Tuple, torch.Size],
         z_size: Union[Tuple, torch.Size],
         h_dim: int = 1000,
+        temp: float = 1.0,
     ):
         super().__init__()
         self.lr = lr
         self.temp = 1.0
-        self.pz_params = nn.Sequential(
+        self.pz = nn.Sequential(
             nn.Flatten(),
             nn.Linear(prod(x_size), h_dim),
             nn.Softplus(),
             nn.Linear(h_dim, h_dim),
             nn.Softplus(),
-            Probabilities(h_dim, z_size),
+            RelaxedBernoulli(h_dim, z_size, temp=temp),
         )
 
-        self.px_params = nn.Sequential(
+        self.px = nn.Sequential(
             nn.Flatten(),
             nn.Linear(prod(z_size), h_dim),
             nn.Softplus(),
             nn.Linear(h_dim, h_dim),
             nn.Softplus(),
-            Probabilities(h_dim, x_size),
+            Bernoulli(h_dim, x_size),
         )
 
     def forward(
         self, x: Tensor, return_elbo: bool = False
     ) -> Union[Tuple[Tensor, Tensor], Tensor]:
-        pz = D.RelaxedBernoulli(self.temp, *self.pz_params(x))
+        pz = self.pz(x)
         z = pz.rsample()
-        px = D.Bernoulli(*self.px_params(z), validate_args=False)
-        return (x, self._elbo(x, pz, px)) if return_elbo else x
+        px = self.px(z)
+        return (
+            (x, self._elbo(x, D.Bernoulli(logits=pz.logits), px)) if return_elbo else x
+        )
 
     def training_step(self, batch, batch_idx):
         x, _ = batch
@@ -150,16 +152,18 @@ class BinaryVAE(pl.LightningModule):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
 
-        z = D.Bernoulli(*self.pz_params(x)).sample()
-        px = D.Bernoulli(*self.px_params(z))
+        z = self.pz(x).sample()
+        px = self.px(z)
         return px.mean
 
-    def _elbo(self, x: Tensor, pz: D.RelaxedBernoulli, px: D.Distribution) -> Tensor:
+    def _elbo(self, x: Tensor, pz: D.Bernoulli, px: D.Distribution) -> Tensor:
         z_prior = D.Bernoulli(logits=torch.ones_like(pz.probs))
-        z_posterior = D.Bernoulli(logits=pz.logits)
-        kl = D.kl_divergence(z_posterior, z_prior).sum(-1)
+        kl = D.kl_divergence(pz, z_prior).sum(-1)
         ll = px.log_prob(x).sum(dim=[-1, -2, -3])
         return ll - kl
 
+    def set_temp(self, new_temp: float) -> None:
+        self.pz.temp = new_temp
 
-VAE = Union[NormalVAE, BinaryVAE]
+
+VAE = Union[NormalVAE, BernoulliVAE]

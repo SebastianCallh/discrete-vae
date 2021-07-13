@@ -1,4 +1,3 @@
-from abc import abstractmethod
 from math import prod
 from typing import Tuple, Union
 import torch
@@ -47,9 +46,26 @@ class LocScale(Parameters):
         return self.loc(x), self.scale(x)
 
 
-class Probabilities(Parameters):
+class Normal(Parameters):
     def __init__(self, in_dim: int, out_size: Union[Tuple, torch.Size]):
-        super().__init__("Probabilities", out_size)
+        super().__init__("Normal", out_size)
+        self.loc = nn.Sequential(
+            nn.Linear(in_dim, prod(out_size)),
+            View(out_size),
+        )
+        self.scale = nn.Sequential(
+            nn.Linear(in_dim, prod(out_size)),
+            View(out_size),
+            nn.Softplus(),
+        )
+
+    def forward(self, x: Tensor) -> D.Normal:
+        return D.Normal(self.loc(x), self.scale(x))
+
+
+class Binary(Parameters):
+    def __init__(self, in_dim: int, out_size: Union[Tuple, torch.Size]):
+        super().__init__("Binary", out_size)
         self._size = out_size
         self.f = nn.Sequential(
             nn.Linear(in_dim, prod(out_size)),
@@ -59,6 +75,50 @@ class Probabilities(Parameters):
 
     def forward(self, x: Tensor) -> Tuple[Tensor]:
         return (self.f(x),)
+
+
+class RelaxedBernoulli(Parameters):
+    def __init__(self, in_dim: int, out_size: Union[Tuple, torch.Size], temp: float):
+        super().__init__("Bernoulli", out_size)
+        self._size = out_size
+        self.temp = temp
+        self.f = nn.Sequential(
+            nn.Linear(in_dim, prod(out_size)),
+            View(out_size),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: Tensor) -> D.RelaxedBernoulli:
+        return D.RelaxedBernoulli(self.temp, probs=self.f(x), validate_args=False)
+
+
+class Bernoulli(Parameters):
+    def __init__(self, in_dim: int, out_size: Union[Tuple, torch.Size]):
+        super().__init__("Bernoulli", out_size)
+        self._size = out_size
+        self.f = nn.Sequential(
+            nn.Linear(in_dim, prod(out_size)),
+            View(out_size),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: Tensor) -> D.Bernoulli:
+        return D.Bernoulli(probs=self.f(x), validate_args=False)
+
+
+class Categorical(Parameters):
+    def __init__(self, in_dim: int, out_size: Union[Tuple, torch.Size], temp: float):
+        super().__init__("Categorical", out_size)
+        self._size = out_size
+        self.temp = temp
+        self.f = nn.Sequential(
+            nn.Linear(in_dim, prod(out_size)),
+            View(out_size),
+            nn.Softmax(-1),
+        )
+
+    def forward(self, x: Tensor) -> D.RelaxedOneHotCategorical:
+        return D.RelaxedOneHotCategorical(self.temp, probs=self.f(x))
 
 
 class Print(nn.Module):
